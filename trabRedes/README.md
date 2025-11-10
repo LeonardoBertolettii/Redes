@@ -1,6 +1,3 @@
-# Sistema de Roteamento Dinâmico por Vetor de Distância
-
-Implementação em Python de um protocolo de roteamento dinâmico por vetor de distância conforme especificação do trabalho final de Fundamentos de Redes de Computadores.
 
 ## Características
 
@@ -12,13 +9,7 @@ Implementação em Python de um protocolo de roteamento dinâmico por vetor de d
 - ✅ Roteamento de mensagens de texto entre roteadores
 - ✅ Comunicação UDP na porta 6000 (configurável)
 
-## Requisitos
 
-- Python 3.6 ou superior
-- Todas as máquinas na mesma rede local
-- Firewall permitindo UDP na porta 6000
-
-## Instalação e Configuração
 
 ### 1. Arquivo de Configuração
 

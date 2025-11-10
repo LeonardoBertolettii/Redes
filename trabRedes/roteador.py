@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Sistema de Roteamento Dinâmico por Vetor de Distância
-Implementação do protocolo de roteamento conforme especificação do trabalho final
-"""
 
 import socket
 import threading
@@ -217,33 +211,29 @@ class Roteador:
         tabela_alterada = False
         
         with self.lock:
-            # Atualiza último contato com o vizinho
             self.ultima_mensagem_vizinho[ip_remetente] = datetime.now()
             
-            # Processa cada rota recebida
             for ip_destino, metrica_recebida in rotas_recebidas:
-                # Incrementa métrica (custo de passar por este roteador)
                 nova_metrica = metrica_recebida + 1
                 
                 rota_atual = self.tabela.obter_rota(ip_destino)
                 
                 if ip_destino == self.ip_roteador:
-                    continue  # Não adiciona rota para si mesmo
+                    continue  
                     
                 if rota_atual is None:
-                    # Nova rota
                     self.tabela.adicionar_rota(ip_destino, nova_metrica, ip_remetente)
                     print(f"[NOVA ROTA] {ip_destino} via {ip_remetente} (métrica: {nova_metrica})")
                     tabela_alterada = True
                 else:
                     metrica_atual, ip_saida_atual = rota_atual
                     if nova_metrica < metrica_atual:
-                        # Rota melhor encontrada
+                        #  melhor encontrada
                         self.tabela.adicionar_rota(ip_destino, nova_metrica, ip_remetente)
                         print(f"[ROTA MELHORADA] {ip_destino}: {metrica_atual} -> {nova_metrica} via {ip_remetente}")
                         tabela_alterada = True
                         
-            # Verifica rotas que não foram mais anunciadas (removidas)
+            # Verifica rotas que não foram mais anunciadas 
             ips_anunciados = {ip for ip, _ in rotas_recebidas}
             rotas_remover = []
             for ip_destino, (_, ip_saida, _) in self.tabela.rotas.items():
@@ -258,7 +248,6 @@ class Roteador:
         if tabela_alterada:
             print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Tabela de roteamento atualizada:")
             print(self.tabela.formatar_para_exibicao())
-            # Envia tabela imediatamente para vizinhos quando há alteração
             self.enviar_tabela_roteamento()
             
     def processar_anuncio_roteador(self, ip_novo_roteador: str):
@@ -286,7 +275,6 @@ class Roteador:
             
             if tabela_alterada:
                 print(self.tabela.formatar_para_exibicao())
-                # Envia tabela imediatamente
                 self.enviar_tabela_roteamento()
                 
     def verificar_falhas_vizinhos(self):
@@ -312,7 +300,6 @@ class Roteador:
     def processar_mensagem_texto(self, mensagem: str, ip_remetente: str):
         """Processa mensagem de texto recebida"""
         try:
-            # Formato: !origem;destino;texto
             partes = mensagem[1:].split(';', 2)
             if len(partes) != 3:
                 return
@@ -327,7 +314,6 @@ class Roteador:
                 print(f"Mensagem: {texto}")
                 print(f"Status: Chegou ao destino\n")
             else:
-                # Precisa rotear a mensagem
                 rota = self.tabela.obter_rota(ip_destino)
                 if rota:
                     _, ip_proximo = rota
@@ -361,7 +347,6 @@ class Roteador:
             print(f"[ERRO] Rota não encontrada para {ip_destino}")
             
     def receber_mensagens(self):
-        """Thread para receber mensagens"""
         while self.rodando:
             try:
                 data, addr = self.socket.recvfrom(1024)
@@ -385,7 +370,6 @@ class Roteador:
                         self.portas_vizinhos[ip_novo] = porta_remetente
                     self.processar_anuncio_roteador(ip_novo)
                 elif mensagem.startswith('!'):
-                    # Mensagem de texto
                     self.processar_mensagem_texto(mensagem, ip_remetente)
             except socket.timeout:
                 continue
@@ -403,20 +387,19 @@ class Roteador:
     def verificar_falhas_periodicamente(self):
         """Thread para verificação periódica de falhas"""
         while self.rodando:
-            time.sleep(5)  # Verifica a cada 5 segundos
+            time.sleep(5)  
             if self.rodando:
                 self.verificar_falhas_vizinhos()
                 
     def exibir_tabela_periodicamente(self):
         """Thread para exibir tabela periodicamente"""
         while self.rodando:
-            time.sleep(30)  # Exibe a cada 30 segundos
+            time.sleep(30)  
             if self.rodando:
                 print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Estado atual da tabela de roteamento:")
                 print(self.tabela.formatar_para_exibicao())
                 
     def iniciar(self):
-        """Inicia o roteador"""
         self.rodando = True
         
         # Thread para receber mensagens
@@ -435,7 +418,7 @@ class Roteador:
         thread_exibir = threading.Thread(target=self.exibir_tabela_periodicamente, daemon=True)
         thread_exibir.start()
         
-        # Anuncia entrada na rede após 1 segundo
+        # Anuncia entrada 
         time.sleep(1)
         self.anunciar_entrada_rede()
         
@@ -446,7 +429,7 @@ class Roteador:
         print("  sair - Encerra o roteador")
         print("\nAguardando comandos...\n")
         
-        # Loop principal para comandos do usuário
+        # comandos principais 
         try:
             while self.rodando:
                 comando = input().strip()
@@ -467,14 +450,12 @@ class Roteador:
             self.parar()
             
     def parar(self):
-        """Para o roteador"""
         self.rodando = False
         self.socket.close()
         print(f"\n[Roteador {self.ip_roteador} encerrado]")
 
 
 def main():
-    """Função principal"""
     if len(sys.argv) < 2:
         print("Uso: python roteador.py <IP_ROTEADOR> [porta]")
         print("Exemplo: python roteador.py 192.168.1.1")
