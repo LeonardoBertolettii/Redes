@@ -1,4 +1,3 @@
-
 import socket
 import threading
 import time
@@ -383,6 +382,8 @@ class Roteador:
             time.sleep(10)
             if self.rodando:
                 self.enviar_tabela_roteamento()
+                # keepalive: garante que vizinhos saibam que ainda estamos vivos
+                self.enviar_keepalive()
                 
     def verificar_falhas_periodicamente(self):
         """Thread para verificação periódica de falhas"""
