@@ -10,7 +10,6 @@ class TabelaRoteamento:
     
     def __init__(self, ip_roteador: str):
         self.ip_roteador = ip_roteador
-        # Tabela: {ip_destino: (metrica, ip_saida, ultima_atualizacao)}
         self.rotas: Dict[str, Tuple[int, str, datetime]] = {}
         
     def adicionar_rota(self, ip_destino: str, metrica: int, ip_saida: str):
@@ -29,12 +28,11 @@ class TabelaRoteamento:
             return (metrica, ip_saida)
         return None
         
-    def obter_rotas_para_envio(self, ip_vizinho: str) -> List[Tuple[str, int]]:
-        """Obtém rotas para envio aplicando Split Horizon"""
+    def obter_rotas_para_envio(self) -> List[Tuple[str, int]]:
+        """Obtém rotas para envio"""
         rotas_envio = []
-        for ip_destino, (metrica, ip_saida, _) in self.rotas.items():
-            # Split Horizon: não enviar rota de volta para quem a ensinou
-            if ip_saida != ip_vizinho and ip_destino != self.ip_roteador:
+        for ip_destino, (metrica, _, _) in self.rotas.items():
+            if ip_destino != self.ip_roteador:
                 rotas_envio.append((ip_destino, metrica))
         return rotas_envio
         
@@ -66,22 +64,17 @@ class Roteador:
         self.porta = porta
         self.tabela = TabelaRoteamento(ip_roteador)
         self.vizinhos: List[str] = []
-        # Portas dos vizinhos (padrão: mesma porta do roteador)
         self.portas_vizinhos: Dict[str, int] = {}
         
-        # Controle de tempo de última mensagem de cada vizinho
         self.ultima_mensagem_vizinho: Dict[str, datetime] = {}
         
-        # Socket UDP
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind((self.ip_roteador, self.porta))
-        self.socket.settimeout(1.0)  # Timeout para permitir verificação periódica
+        self.socket.settimeout(1.0)
         
-        # Flags de controle
         self.rodando = False
         self.rede_existente = False
         
-        # Lock para operações thread-safe
         self.lock = threading.Lock()
         
     def carregar_configuracao(self, arquivo: str = "roteadores.txt"):
@@ -89,17 +82,14 @@ class Roteador:
         try:
             with open(arquivo, 'r') as f:
                 for linha in f:
-                    # Remove espaços e comentários (linhas que começam com #)
                     linha = linha.strip()
                     if linha.startswith('#'):
                         continue
                     
-                    # Verifica se é configuração de porta (PORTA=6000)
                     if linha.upper().startswith('PORTA='):
                         try:
                             porta_config = int(linha.split('=')[1].split('#')[0].strip())
                             self.porta = porta_config
-                            # Recria socket com nova porta
                             self.socket.close()
                             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                             self.socket.bind((self.ip_roteador, self.porta))
@@ -109,12 +99,10 @@ class Roteador:
                             print(f"[AVISO] Linha de porta inválida: {linha}")
                         continue
                     
-                    # Processa linha de vizinho (pode ser IP ou IP:PORTA)
-                    linha = linha.split('#')[0].strip()  # Remove comentários no final da linha
+                    linha = linha.split('#')[0].strip()
                     if not linha:
                         continue
                     
-                    # Verifica se tem porta especificada (formato IP:PORTA)
                     if ':' in linha:
                         partes = linha.split(':')
                         if len(partes) == 2:
@@ -125,24 +113,20 @@ class Roteador:
                                 if ip and ip != self.ip_roteador:
                                     self.vizinhos.append(ip)
                                     self.portas_vizinhos[ip] = porta_vizinho
-                                    # Adiciona rota inicial com métrica 1
                                     self.tabela.adicionar_rota(ip, 1, ip)
                                     self.ultima_mensagem_vizinho[ip] = datetime.now()
                             except ValueError:
                                 print(f"[AVISO] Porta inválida para {ip}: {porta_str}")
                         else:
-                            # IP com dois pontos (IPv6?), tratar como IP normal
                             if linha and linha != self.ip_roteador:
                                 self.vizinhos.append(linha)
-                                self.portas_vizinhos[linha] = self.porta  # Usa porta padrão
+                                self.portas_vizinhos[linha] = self.porta
                                 self.tabela.adicionar_rota(linha, 1, linha)
                                 self.ultima_mensagem_vizinho[linha] = datetime.now()
                     else:
-                        # Formato simples: apenas IP (usa porta padrão)
                         if linha and linha != self.ip_roteador:
                             self.vizinhos.append(linha)
-                            self.portas_vizinhos[linha] = self.porta  # Usa porta padrão
-                            # Adiciona rota inicial com métrica 1
+                            self.portas_vizinhos[linha] = self.porta
                             self.tabela.adicionar_rota(linha, 1, linha)
                             self.ultima_mensagem_vizinho[linha] = datetime.now()
                             
@@ -175,8 +159,7 @@ class Roteador:
         """Envia tabela de roteamento para todos os vizinhos"""
         with self.lock:
             for vizinho in self.vizinhos:
-                rotas_envio = self.tabela.obter_rotas_para_envio(vizinho)
-                # Sempre envia mensagem, mesmo que não haja rotas (keepalive)
+                rotas_envio = self.tabela.obter_rotas_para_envio()
                 mensagem = self._formatar_mensagem_rotas(rotas_envio) if rotas_envio else ""
                 porta_vizinho = self.portas_vizinhos.get(vizinho, self.porta)
                 try:
@@ -188,15 +171,12 @@ class Roteador:
     def enviar_keepalive(self):
         """Envia keepalive para todos os vizinhos (anuncia presença e envia tabela)"""
         with self.lock:
-            # Primeiro anuncia a presença do roteador
             mensagem_anuncio = f"@{self.ip_roteador}"
             for vizinho in self.vizinhos:
                 porta_vizinho = self.portas_vizinhos.get(vizinho, self.porta)
                 try:
-                    # Anuncia presença
                     self.socket.sendto(mensagem_anuncio.encode('utf-8'), (vizinho, porta_vizinho))
-                    # Envia tabela de roteamento
-                    rotas_envio = self.tabela.obter_rotas_para_envio(vizinho)
+                    rotas_envio = self.tabela.obter_rotas_para_envio()
                     if rotas_envio:
                         mensagem_rotas = self._formatar_mensagem_rotas(rotas_envio)
                         self.socket.sendto(mensagem_rotas.encode('utf-8'), (vizinho, porta_vizinho))
@@ -246,12 +226,10 @@ class Roteador:
                 else:
                     metrica_atual, ip_saida_atual = rota_atual
                     if nova_metrica < metrica_atual:
-                        #  melhor encontrada
                         self.tabela.adicionar_rota(ip_destino, nova_metrica, ip_remetente)
                         print(f"[ROTA MELHORADA] {ip_destino}: {metrica_atual} -> {nova_metrica} via {ip_remetente}")
                         tabela_alterada = True
                         
-            # Verifica rotas que não foram mais anunciadas 
             ips_anunciados = {ip for ip, _ in rotas_recebidas}
             rotas_remover = []
             for ip_destino, (_, ip_saida, _) in self.tabela.rotas.items():
@@ -276,10 +254,8 @@ class Roteador:
         with self.lock:
             rota_atual = self.tabela.obter_rota(ip_novo_roteador)
             
-            # Sempre atualiza o timestamp (keepalive)
             self.ultima_mensagem_vizinho[ip_novo_roteador] = datetime.now()
             
-            # Se não existe rota ou se a rota atual tem métrica maior que 1, atualiza
             if rota_atual is None:
                 self.tabela.adicionar_rota(ip_novo_roteador, 1, ip_novo_roteador)
                 tabela_alterada = True
@@ -291,34 +267,28 @@ class Roteador:
                 print(f"[ROTA ATUALIZADA] {ip_novo_roteador} atualizado para métrica 1")
                 deve_enviar_resposta = True
             else:
-                # Roteador já conhecido - sempre responde com tabela (keepalive com resposta)
                 deve_enviar_resposta = True
                 
             if ip_novo_roteador not in self.vizinhos:
                 self.vizinhos.append(ip_novo_roteador)
-                # Se não tinha porta configurada, usa porta padrão
                 if ip_novo_roteador not in self.portas_vizinhos:
                     self.portas_vizinhos[ip_novo_roteador] = self.porta
             
             if tabela_alterada:
                 print(self.tabela.formatar_para_exibicao())
         
-        # Fora do lock: envia resposta
         if deve_enviar_resposta:
-            # Responde imediatamente com a tabela para o roteador que anunciou
             self._enviar_tabela_para_vizinho(ip_novo_roteador)
             
-            # Se houve alteração na tabela, envia para todos os vizinhos
             if tabela_alterada:
                 self.enviar_tabela_roteamento()
                 
     def _enviar_tabela_para_vizinho(self, vizinho: str):
         """Envia tabela de roteamento para um vizinho específico (sem lock - deve ser chamado cuidadosamente)"""
         with self.lock:
-            rotas_envio = self.tabela.obter_rotas_para_envio(vizinho)
+            rotas_envio = self.tabela.obter_rotas_para_envio()
             porta_vizinho = self.portas_vizinhos.get(vizinho, self.porta)
         
-        # Envia fora do lock
         if rotas_envio:
             mensagem = self._formatar_mensagem_rotas(rotas_envio)
             try:
@@ -356,7 +326,6 @@ class Roteador:
             ip_origem, ip_destino, texto = partes
             
             if ip_destino == self.ip_roteador:
-                # Mensagem chegou ao destino
                 print(f"\n[MENSAGEM RECEBIDA]")
                 print(f"Origem: {ip_origem}")
                 print(f"Destino: {ip_destino} (você)")
@@ -372,7 +341,6 @@ class Roteador:
                     print(f"Próximo salto: {ip_proximo}")
                     print(f"Mensagem: {texto}")
                     
-                    # Reenvia mensagem para próximo salto
                     porta_proximo = self.portas_vizinhos.get(ip_proximo, self.porta)
                     self.socket.sendto(mensagem.encode('utf-8'), (ip_proximo, porta_proximo))
                 else:
@@ -403,18 +371,14 @@ class Roteador:
                 ip_remetente = addr[0]
                 porta_remetente = addr[1]
                 
-                # Salva porta do remetente se conhecido ou se não estava configurado
                 if ip_remetente in self.vizinhos:
                     if ip_remetente not in self.portas_vizinhos or self.portas_vizinhos[ip_remetente] != porta_remetente:
                         self.portas_vizinhos[ip_remetente] = porta_remetente
                 
                 if mensagem.startswith('*'):
-                    # Mensagem de anúncio de rotas
                     self.processar_mensagem_rotas(mensagem, ip_remetente)
                 elif mensagem.startswith('@'):
-                    # Anúncio de novo roteador
                     ip_novo = mensagem[1:]
-                    # Se não conhecemos a porta, salva da mensagem recebida
                     if ip_novo not in self.portas_vizinhos:
                         self.portas_vizinhos[ip_novo] = porta_remetente
                     self.processar_anuncio_roteador(ip_novo)
@@ -431,7 +395,6 @@ class Roteador:
         while self.rodando:
             time.sleep(10)
             if self.rodando:
-                # Envia keepalive para anunciar presença e atualizar tabela
                 self.enviar_keepalive()
                 
     def verificar_falhas_periodicamente(self):
@@ -452,23 +415,18 @@ class Roteador:
     def iniciar(self):
         self.rodando = True
         
-        # Thread para receber mensagens
         thread_receber = threading.Thread(target=self.receber_mensagens, daemon=True)
         thread_receber.start()
         
-        # Thread para atualização periódica
         thread_atualizar = threading.Thread(target=self.atualizar_periodicamente, daemon=True)
         thread_atualizar.start()
         
-        # Thread para verificação de falhas
         thread_falhas = threading.Thread(target=self.verificar_falhas_periodicamente, daemon=True)
         thread_falhas.start()
         
-        # Thread para exibir tabela periodicamente
         thread_exibir = threading.Thread(target=self.exibir_tabela_periodicamente, daemon=True)
         thread_exibir.start()
         
-        # Anuncia entrada 
         time.sleep(1)
         self.anunciar_entrada_rede()
         
@@ -479,7 +437,6 @@ class Roteador:
         print("  sair - Encerra o roteador")
         print("\nAguardando comandos...\n")
         
-        # comandos principais 
         try:
             while self.rodando:
                 try:
@@ -498,8 +455,6 @@ class Roteador:
                     elif comando:
                         print(f"Comando desconhecido: {comando}")
                 except EOFError:
-                    # EOFError ocorre quando não há entrada disponível (ex: redirecionamento)
-                    # Aguarda um pouco e continua o loop
                     time.sleep(0.1)
                     continue
         except KeyboardInterrupt:
