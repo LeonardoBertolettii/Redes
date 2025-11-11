@@ -176,13 +176,32 @@ class Roteador:
         with self.lock:
             for vizinho in self.vizinhos:
                 rotas_envio = self.tabela.obter_rotas_para_envio(vizinho)
-                if rotas_envio:
-                    mensagem = self._formatar_mensagem_rotas(rotas_envio)
-                    porta_vizinho = self.portas_vizinhos.get(vizinho, self.porta)
-                    try:
+                # Sempre envia mensagem, mesmo que não haja rotas (keepalive)
+                mensagem = self._formatar_mensagem_rotas(rotas_envio) if rotas_envio else ""
+                porta_vizinho = self.portas_vizinhos.get(vizinho, self.porta)
+                try:
+                    if mensagem:
                         self.socket.sendto(mensagem.encode('utf-8'), (vizinho, porta_vizinho))
-                    except Exception as e:
-                        print(f"[ERRO] Erro ao enviar tabela para {vizinho}:{porta_vizinho}: {e}")
+                except Exception as e:
+                    print(f"[ERRO] Erro ao enviar tabela para {vizinho}:{porta_vizinho}: {e}")
+                    
+    def enviar_keepalive(self):
+        """Envia keepalive para todos os vizinhos (anuncia presença e envia tabela)"""
+        with self.lock:
+            # Primeiro anuncia a presença do roteador
+            mensagem_anuncio = f"@{self.ip_roteador}"
+            for vizinho in self.vizinhos:
+                porta_vizinho = self.portas_vizinhos.get(vizinho, self.porta)
+                try:
+                    # Anuncia presença
+                    self.socket.sendto(mensagem_anuncio.encode('utf-8'), (vizinho, porta_vizinho))
+                    # Envia tabela de roteamento
+                    rotas_envio = self.tabela.obter_rotas_para_envio(vizinho)
+                    if rotas_envio:
+                        mensagem_rotas = self._formatar_mensagem_rotas(rotas_envio)
+                        self.socket.sendto(mensagem_rotas.encode('utf-8'), (vizinho, porta_vizinho))
+                except Exception as e:
+                    print(f"[ERRO] Erro ao enviar keepalive para {vizinho}:{porta_vizinho}: {e}")
                         
     def _formatar_mensagem_rotas(self, rotas: List[Tuple[str, int]]) -> str:
         """Formata mensagem de anúncio de rotas"""
@@ -250,31 +269,62 @@ class Roteador:
             self.enviar_tabela_roteamento()
             
     def processar_anuncio_roteador(self, ip_novo_roteador: str):
-        """Processa anúncio de novo roteador na rede"""
+        """Processa anúncio de novo roteador na rede (também funciona como keepalive)"""
+        tabela_alterada = False
+        deve_enviar_resposta = False
+        
         with self.lock:
-            tabela_alterada = False
             rota_atual = self.tabela.obter_rota(ip_novo_roteador)
+            
+            # Sempre atualiza o timestamp (keepalive)
+            self.ultima_mensagem_vizinho[ip_novo_roteador] = datetime.now()
             
             # Se não existe rota ou se a rota atual tem métrica maior que 1, atualiza
             if rota_atual is None:
                 self.tabela.adicionar_rota(ip_novo_roteador, 1, ip_novo_roteador)
                 tabela_alterada = True
                 print(f"[NOVO ROTEADOR] {ip_novo_roteador} adicionado à tabela (métrica: 1)")
+                deve_enviar_resposta = True
             elif rota_atual[0] > 1:
                 self.tabela.adicionar_rota(ip_novo_roteador, 1, ip_novo_roteador)
                 tabela_alterada = True
                 print(f"[ROTA ATUALIZADA] {ip_novo_roteador} atualizado para métrica 1")
+                deve_enviar_resposta = True
+            else:
+                # Roteador já conhecido - sempre responde com tabela (keepalive com resposta)
+                deve_enviar_resposta = True
                 
             if ip_novo_roteador not in self.vizinhos:
                 self.vizinhos.append(ip_novo_roteador)
                 # Se não tinha porta configurada, usa porta padrão
                 if ip_novo_roteador not in self.portas_vizinhos:
                     self.portas_vizinhos[ip_novo_roteador] = self.porta
-            self.ultima_mensagem_vizinho[ip_novo_roteador] = datetime.now()
             
             if tabela_alterada:
                 print(self.tabela.formatar_para_exibicao())
+        
+        # Fora do lock: envia resposta
+        if deve_enviar_resposta:
+            # Responde imediatamente com a tabela para o roteador que anunciou
+            self._enviar_tabela_para_vizinho(ip_novo_roteador)
+            
+            # Se houve alteração na tabela, envia para todos os vizinhos
+            if tabela_alterada:
                 self.enviar_tabela_roteamento()
+                
+    def _enviar_tabela_para_vizinho(self, vizinho: str):
+        """Envia tabela de roteamento para um vizinho específico (sem lock - deve ser chamado cuidadosamente)"""
+        with self.lock:
+            rotas_envio = self.tabela.obter_rotas_para_envio(vizinho)
+            porta_vizinho = self.portas_vizinhos.get(vizinho, self.porta)
+        
+        # Envia fora do lock
+        if rotas_envio:
+            mensagem = self._formatar_mensagem_rotas(rotas_envio)
+            try:
+                self.socket.sendto(mensagem.encode('utf-8'), (vizinho, porta_vizinho))
+            except Exception as e:
+                print(f"[ERRO] Erro ao enviar tabela para {vizinho}:{porta_vizinho}: {e}")
                 
     def verificar_falhas_vizinhos(self):
         """Verifica se algum vizinho parou de responder"""
@@ -381,8 +431,7 @@ class Roteador:
         while self.rodando:
             time.sleep(10)
             if self.rodando:
-                self.enviar_tabela_roteamento()
-                # keepalive: garante que vizinhos saibam que ainda estamos vivos
+                # Envia keepalive para anunciar presença e atualizar tabela
                 self.enviar_keepalive()
                 
     def verificar_falhas_periodicamente(self):
@@ -433,20 +482,26 @@ class Roteador:
         # comandos principais 
         try:
             while self.rodando:
-                comando = input().strip()
-                if comando == "sair":
-                    self.parar()
-                elif comando == "tabela":
-                    print(self.tabela.formatar_para_exibicao())
-                elif comando.startswith("enviar "):
-                    partes = comando.split(' ', 2)
-                    if len(partes) == 3:
-                        _, ip_destino, texto = partes
-                        self.enviar_mensagem_texto(ip_destino, texto)
-                    else:
-                        print("Uso: enviar <IP_DESTINO> <mensagem>")
-                elif comando:
-                    print(f"Comando desconhecido: {comando}")
+                try:
+                    comando = input().strip()
+                    if comando == "sair":
+                        self.parar()
+                    elif comando == "tabela":
+                        print(self.tabela.formatar_para_exibicao())
+                    elif comando.startswith("enviar "):
+                        partes = comando.split(' ', 2)
+                        if len(partes) == 3:
+                            _, ip_destino, texto = partes
+                            self.enviar_mensagem_texto(ip_destino, texto)
+                        else:
+                            print("Uso: enviar <IP_DESTINO> <mensagem>")
+                    elif comando:
+                        print(f"Comando desconhecido: {comando}")
+                except EOFError:
+                    # EOFError ocorre quando não há entrada disponível (ex: redirecionamento)
+                    # Aguarda um pouco e continua o loop
+                    time.sleep(0.1)
+                    continue
         except KeyboardInterrupt:
             self.parar()
             
