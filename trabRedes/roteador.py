@@ -6,14 +6,12 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 
 class TabelaRoteamento:
-    """Classe para gerenciar a tabela de roteamento"""
     
     def __init__(self, ip_roteador: str):
         self.ip_roteador = ip_roteador
         self.rotas: Dict[str, Tuple[int, str, datetime]] = {}
         
     def adicionar_rota(self, ip_destino: str, metrica: int, ip_saida: str):
-        """Adiciona ou atualiza uma rota na tabela"""
         self.rotas[ip_destino] = (metrica, ip_saida, datetime.now())
         
     def remover_rota(self, ip_destino: str):
@@ -22,14 +20,12 @@ class TabelaRoteamento:
             del self.rotas[ip_destino]
             
     def obter_rota(self, ip_destino: str) -> Optional[Tuple[int, str]]:
-        """Obtém a rota para um destino (métrica, ip_saida)"""
         if ip_destino in self.rotas:
             metrica, ip_saida, _ = self.rotas[ip_destino]
             return (metrica, ip_saida)
         return None
         
     def obter_rotas_para_envio(self) -> List[Tuple[str, int]]:
-        """Obtém rotas para envio"""
         rotas_envio = []
         for ip_destino, (metrica, _, _) in self.rotas.items():
             if ip_destino != self.ip_roteador:
@@ -37,7 +33,6 @@ class TabelaRoteamento:
         return rotas_envio
         
     def formatar_para_exibicao(self) -> str:
-        """Formata a tabela para exibição"""
         if not self.rotas:
             return "Tabela vazia"
         resultado = f"\n{'IP Destino':<20} {'Métrica':<10} {'IP Saída':<20}\n"
@@ -47,7 +42,6 @@ class TabelaRoteamento:
         return resultado
         
     def remover_rotas_por_vizinho(self, ip_vizinho: str):
-        """Remove todas as rotas que passam por um vizinho específico"""
         rotas_remover = []
         for ip_destino, (_, ip_saida, _) in self.rotas.items():
             if ip_saida == ip_vizinho or ip_destino == ip_vizinho:
@@ -57,7 +51,6 @@ class TabelaRoteamento:
 
 
 class Roteador:
-    """Classe principal do roteador"""
     
     def __init__(self, ip_roteador: str, porta: int = 6000):
         self.ip_roteador = ip_roteador
@@ -78,7 +71,6 @@ class Roteador:
         self.lock = threading.Lock()
         
     def carregar_configuracao(self, arquivo: str = "roteadores.txt"):
-        """Carrega os vizinhos diretos do arquivo de configuração"""
         try:
             with open(arquivo, 'r') as f:
                 for linha in f:
@@ -144,7 +136,6 @@ class Roteador:
             sys.exit(1)
             
     def anunciar_entrada_rede(self):
-        """Anuncia entrada do roteador em uma rede existente"""
         mensagem = f"@{self.ip_roteador}"
         for vizinho in self.vizinhos:
             porta_vizinho = self.portas_vizinhos.get(vizinho, self.porta)
@@ -156,7 +147,6 @@ class Roteador:
         self.rede_existente = True
         
     def enviar_tabela_roteamento(self):
-        """Envia tabela de roteamento para todos os vizinhos"""
         with self.lock:
             for vizinho in self.vizinhos:
                 rotas_envio = self.tabela.obter_rotas_para_envio()
@@ -169,7 +159,6 @@ class Roteador:
                     print(f"[ERRO] Erro ao enviar tabela para {vizinho}:{porta_vizinho}: {e}")
                     
     def enviar_keepalive(self):
-        """Envia keepalive para todos os vizinhos (anuncia presença e envia tabela)"""
         with self.lock:
             mensagem_anuncio = f"@{self.ip_roteador}"
             for vizinho in self.vizinhos:
@@ -184,14 +173,12 @@ class Roteador:
                     print(f"[ERRO] Erro ao enviar keepalive para {vizinho}:{porta_vizinho}: {e}")
                         
     def _formatar_mensagem_rotas(self, rotas: List[Tuple[str, int]]) -> str:
-        """Formata mensagem de anúncio de rotas"""
         partes = []
         for ip_destino, metrica in rotas:
             partes.append(f"*{ip_destino};{metrica}")
         return "".join(partes)
         
     def _parsear_mensagem_rotas(self, mensagem: str) -> List[Tuple[str, int]]:
-        """Parseia mensagem de anúncio de rotas"""
         rotas = []
         partes = mensagem.split('*')
         for parte in partes:
@@ -204,7 +191,6 @@ class Roteador:
         return rotas
         
     def processar_mensagem_rotas(self, mensagem: str, ip_remetente: str):
-        """Processa mensagem de anúncio de rotas recebida"""
         rotas_recebidas = self._parsear_mensagem_rotas(mensagem)
         tabela_alterada = False
         
@@ -247,7 +233,6 @@ class Roteador:
             self.enviar_tabela_roteamento()
             
     def processar_anuncio_roteador(self, ip_novo_roteador: str):
-        """Processa anúncio de novo roteador na rede (também funciona como keepalive)"""
         tabela_alterada = False
         deve_enviar_resposta = False
         
@@ -284,7 +269,6 @@ class Roteador:
                 self.enviar_tabela_roteamento()
                 
     def _enviar_tabela_para_vizinho(self, vizinho: str):
-        """Envia tabela de roteamento para um vizinho específico (sem lock - deve ser chamado cuidadosamente)"""
         with self.lock:
             rotas_envio = self.tabela.obter_rotas_para_envio()
             porta_vizinho = self.portas_vizinhos.get(vizinho, self.porta)
@@ -297,7 +281,6 @@ class Roteador:
                 print(f"[ERRO] Erro ao enviar tabela para {vizinho}:{porta_vizinho}: {e}")
                 
     def verificar_falhas_vizinhos(self):
-        """Verifica se algum vizinho parou de responder"""
         timeout = timedelta(seconds=15)
         agora = datetime.now()
         vizinhos_inativos = []
@@ -317,7 +300,6 @@ class Roteador:
                 print(self.tabela.formatar_para_exibicao())
                 
     def processar_mensagem_texto(self, mensagem: str, ip_remetente: str):
-        """Processa mensagem de texto recebida"""
         try:
             partes = mensagem[1:].split(';', 2)
             if len(partes) != 3:
@@ -349,7 +331,6 @@ class Roteador:
             print(f"[ERRO] Erro ao processar mensagem de texto: {e}")
             
     def enviar_mensagem_texto(self, ip_destino: str, texto: str):
-        """Envia mensagem de texto para um destino"""
         rota = self.tabela.obter_rota(ip_destino)
         if rota:
             _, ip_proximo = rota
