@@ -15,7 +15,6 @@ class TabelaRoteamento:
         self.rotas[ip_destino] = (metrica, ip_saida, datetime.now())
         
     def remover_rota(self, ip_destino: str):
-        """Remove uma rota da tabela"""
         if ip_destino in self.rotas:
             del self.rotas[ip_destino]
             
